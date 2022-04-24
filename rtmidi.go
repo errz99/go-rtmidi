@@ -380,3 +380,7 @@ func (m *midiOut) SendMessage(b []byte) error {
 func (m *midiOut) Destroy() {
 	C.rtmidi_out_free(m.out)
 }
+
+func testCallback(idx int) {
+	C.testCallback(C.int(idx))
+}

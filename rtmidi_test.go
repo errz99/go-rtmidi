@@ -1,9 +1,12 @@
 package rtmidi
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"os"
 	"testing"
+	"time"
 )
 
 func ExampleCompiledAPI() {
@@ -51,11 +54,24 @@ func ExampleMIDIIn_SetCallback() {
 // Tests
 //
 
+var IsDummy bool
+
 // Ensure there is at least one API available
 func TestCompiledAPI(t *testing.T) {
 	apis := CompiledAPI()
 	if len(apis) < 1 {
 		t.Errorf("Compiled API list is empty")
+	}
+}
+
+func TestAPIString(t *testing.T) {
+	for a := APIUnspecified; a <= APIDummy; a++ {
+		if a.String() == "?" {
+			t.Errorf("Missing string for API value %d", int(a))
+		}
+	}
+	if (APIDummy + API(1)).String() != "?" {
+		t.Errorf("More valid API strings than expected")
 	}
 }
 
@@ -73,6 +89,11 @@ func closeAfter(t *testing.T, m MIDI) {
 
 // Tests specific to a MIDIIn port
 func testInputPort(t *testing.T, m MIDIIn) {
+	_, err := m.API()
+	if err != nil {
+		t.Error(err)
+	}
+
 	t.Run("ignore", func(t *testing.T) {
 		for i := 0; i < 8; i++ {
 			sysex := (i & 1)
@@ -97,15 +118,39 @@ func testInputPort(t *testing.T, m MIDIIn) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		p := findMIDIIn(0)
+		if p == nil {
+			t.Errorf("No callback found in the registry")
+		}
+		testCallback(0)
 		err = m.CancelCallback()
 		if err != nil {
 			t.Error(err)
 		}
 	})
+
+	t.Run("message", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		go func() {
+			_, _, err := m.Message()
+			if err != nil {
+				t.Error(err)
+			}
+		}()
+
+		<-ctx.Done()
+	})
 }
 
 // Tests specific to a MIDIOut port
 func testOutputPort(t *testing.T, m MIDIOut) {
+	_, err := m.API()
+	if err != nil {
+		t.Error(err)
+	}
+
 	messages := []struct {
 		name  string
 		bytes []byte
@@ -149,9 +194,134 @@ func testVirtualPort(m MIDI, err error) func(t *testing.T) {
 	}
 }
 
+func testExistingPort(m MIDI, err error) func(t *testing.T) {
+	return func(t *testing.T) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		closeAfter(t, m)
+
+		var n int
+		var name string
+
+		t.Run("count", func(t *testing.T) {
+			n, err = m.PortCount()
+			if err != nil {
+				t.Error(err)
+			}
+		})
+
+		if IsDummy || testing.Short() {
+			return
+		}
+
+		if n < 1 {
+			t.Fatal("There were zero available ports")
+		}
+
+		t.Run("name", func(t *testing.T) {
+			name, err = m.PortName(0)
+			if err != nil {
+				t.Error(err)
+			}
+		})
+
+		if name == "" {
+			t.Fatal("Port name is an empty string")
+		}
+
+		t.Run("open", func(t *testing.T) {
+			err = m.OpenPort(0, name)
+			if err != nil {
+				t.Error(err)
+			}
+		})
+
+		switch mm := m.(type) {
+		case MIDIIn:
+			testInputPort(t, mm)
+		case MIDIOut:
+			testOutputPort(t, mm)
+		default:
+			t.Fatalf("Unexpected port type %T", mm)
+		}
+	}
+}
+
+func testErrs(m MIDI, err error) func(t *testing.T) {
+	return func(t *testing.T) {
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Run("open", func(t *testing.T) {
+			err := m.OpenPort(123, "unnamed")
+			if !IsDummy && err == nil {
+				t.Error("No error opening an invalid port")
+			}
+		})
+
+		t.Run("name", func(t *testing.T) {
+			n, err := m.PortName(123)
+			if !IsDummy && (err == nil || n != "") {
+				t.Error("No error getting port name for an invalid port")
+			}
+		})
+	}
+}
+
+// Run tests for each API discovered
+func TestAPIs(t *testing.T) {
+	for _, api := range CompiledAPI() {
+		name := api.String()
+		if name == "?" {
+			name = fmt.Sprintf("RtMidiApi(%d)", int(api))
+			t.Errorf("API %s is unnamed", name)
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Run("output", testExistingPort(NewMIDIOut(api, "RtMidi")))
+			t.Run("input", testExistingPort(NewMIDIIn(api, "RtMidi", 1024)))
+		})
+	}
+}
+
 func TestDefaults(t *testing.T) {
 	t.Run("virtual", func(t *testing.T) {
 		t.Run("output", testVirtualPort(NewMIDIOutDefault()))
 		t.Run("input", testVirtualPort(NewMIDIInDefault()))
 	})
+
+	t.Run("default", func(t *testing.T) {
+		t.Run("output", testExistingPort(NewMIDIOutDefault()))
+		t.Run("input", testExistingPort(NewMIDIInDefault()))
+	})
+
+	t.Run("errors", func(t *testing.T) {
+		t.Run("output", testErrs(NewMIDIOutDefault()))
+		t.Run("input", testErrs(NewMIDIInDefault()))
+	})
+}
+
+func TestDestroy(t *testing.T) {
+	out, err := NewMIDIOutDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	in, err := NewMIDIInDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out.Destroy()
+	in.Destroy()
+}
+
+func TestMain(m *testing.M) {
+	apis := CompiledAPI()
+	if len(apis) == 1 && apis[0] == APIDummy {
+		IsDummy = true
+	}
+	os.Exit(m.Run())
 }
