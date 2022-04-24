@@ -2,6 +2,7 @@ package rtmidi
 
 import (
 	"log"
+	"testing"
 )
 
 func ExampleCompiledAPI() {
@@ -43,4 +44,16 @@ func ExampleMIDIIn_SetCallback() {
 		log.Println(msg, t)
 	})
 	<-make(chan struct{})
+}
+
+//
+// Tests
+//
+
+// Ensure there is at least one API available
+func TestCompiledAPI(t *testing.T) {
+	apis := CompiledAPI()
+	if len(apis) < 1 {
+		t.Errorf("Compiled API list is empty")
+	}
 }
