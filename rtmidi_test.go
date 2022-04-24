@@ -1,6 +1,7 @@
 package rtmidi
 
 import (
+	"fmt"
 	"log"
 	"testing"
 )
@@ -56,4 +57,101 @@ func TestCompiledAPI(t *testing.T) {
 	if len(apis) < 1 {
 		t.Errorf("Compiled API list is empty")
 	}
+}
+
+// Helper to close a port when the test is complete
+func closeAfter(t *testing.T, m MIDI) {
+	t.Cleanup(func() {
+		t.Run("close", func(t *testing.T) {
+			err := m.Close()
+			if err != nil {
+				t.Error(err)
+			}
+		})
+	})
+}
+
+// Tests specific to a MIDIIn port
+func testInputPort(t *testing.T, m MIDIIn) {
+	t.Run("ignore", func(t *testing.T) {
+		for i := 0; i < 8; i++ {
+			sysex := (i & 1)
+			sense := ((i >> 1) & 1)
+			timing := ((i >> 2) & 1)
+
+			k := fmt.Sprintf("%d%d%d", sysex, timing, sense)
+			t.Run(k, func(t *testing.T) {
+				err := m.IgnoreTypes(sysex == 1, timing == 1, sense == 1)
+				if err != nil {
+					t.Error(err)
+				}
+			})
+		}
+	})
+
+	t.Run("callback", func(t *testing.T) {
+		callback := func(MIDIIn, []byte, float64) {
+			// do nothing
+		}
+		err := m.SetCallback(callback)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = m.CancelCallback()
+		if err != nil {
+			t.Error(err)
+		}
+	})
+}
+
+// Tests specific to a MIDIOut port
+func testOutputPort(t *testing.T, m MIDIOut) {
+	messages := []struct {
+		name  string
+		bytes []byte
+	}{
+		{"note-on", []byte{0x90, 0x30, 0x60}},
+		{"note-off", []byte{0x80, 0x30, 0x00}},
+	}
+
+	t.Run("send", func(t *testing.T) {
+		for _, msg := range messages {
+			t.Run(msg.name, func(t *testing.T) {
+				err := m.SendMessage(msg.bytes)
+				if err != nil {
+					t.Error(err)
+				}
+			})
+		}
+	})
+}
+
+func testVirtualPort(m MIDI, err error) func(t *testing.T) {
+	return func(t *testing.T) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		closeAfter(t, m)
+
+		err = m.OpenVirtualPort("RtMidiVirtual")
+		if err != nil {
+			t.Error(err)
+		}
+
+		switch mm := m.(type) {
+		case MIDIIn:
+			testInputPort(t, mm)
+		case MIDIOut:
+			testOutputPort(t, mm)
+		default:
+			t.Fatalf("Unexpected port type %T", mm)
+		}
+	}
+}
+
+func TestDefaults(t *testing.T) {
+	t.Run("virtual", func(t *testing.T) {
+		t.Run("output", testVirtualPort(NewMIDIOutDefault()))
+		t.Run("input", testVirtualPort(NewMIDIInDefault()))
+	})
 }
