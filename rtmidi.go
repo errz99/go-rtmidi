@@ -11,19 +11,7 @@ package rtmidi
 #cgo darwin CXXFLAGS: -D__MACOSX_CORE__
 #cgo darwin LDFLAGS: -framework CoreServices -framework CoreAudio -framework CoreMIDI -framework CoreFoundation
 
-#include <stdlib.h>
-#include <stdint.h>
-#include "rtmidi_stub.h"
-
-extern void goMIDIInCallback(double ts, unsigned char *msg, size_t msgsz, void *arg);
-
-static inline void midiInCallback(double ts, const unsigned char *msg, size_t msgsz, void *arg) {
-	goMIDIInCallback(ts, (unsigned char*) msg, msgsz, arg);
-}
-
-static inline void cgoSetCallback(RtMidiPtr in, int cb_id) {
-	rtmidi_in_set_callback(in, midiInCallback, (void*)(uintptr_t) cb_id);
-}
+#include "lib.h"
 */
 import "C"
 import (
