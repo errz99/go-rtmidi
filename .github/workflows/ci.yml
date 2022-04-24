@@ -18,3 +18,5 @@ jobs:
         run: go test -race -coverprofile=coverage.out -covermode=atomic
         env:
           CGO_CPPFLAGS:  "-DGO_COVERAGE_TEST"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2
