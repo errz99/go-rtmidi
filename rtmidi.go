@@ -20,9 +20,6 @@ import (
 	"unsafe"
 )
 
-// API is an enumeration of possible MIDI API specifiers.
-type API C.enum_RtMidiApi
-
 const (
 	// APIUnspecified searches for a working compiled API.
 	APIUnspecified API = C.RTMIDI_API_UNSPECIFIED
@@ -38,35 +35,8 @@ const (
 	APIDummy API = C.RTMIDI_API_RTMIDI_DUMMY
 )
 
-// Format an API as a string
-func (api API) String() string {
-	switch api {
-	case APIUnspecified:
-		return "unspecified"
-	case APILinuxALSA:
-		return "alsa"
-	case APIUnixJack:
-		return "jack"
-	case APIMacOSXCore:
-		return "coreaudio"
-	case APIWindowsMM:
-		return "winmm"
-	case APIDummy:
-		return "dummy"
-	}
-	return "?"
-}
-
-// CompiledAPI determines the available compiled MIDI APIs.
-func CompiledAPI() (apis []API) {
-	n := C.rtmidi_get_compiled_api(nil, 0)
-	capis := make([]C.enum_RtMidiApi, n, n)
-	C.rtmidi_get_compiled_api(&capis[0], C.uint(n))
-	for _, capi := range capis {
-		apis = append(apis, API(capi))
-	}
-	return apis
-}
+// API is an enumeration of possible MIDI API specifiers.
+type API C.enum_RtMidiApi
 
 // MIDI interface provides a common, platform-independent API for realtime MIDI
 // device enumeration and handling MIDI ports.
@@ -106,8 +76,50 @@ type MIDIOut interface {
 	Destroy()
 }
 
+// Private types
 type midi struct {
 	midi C.RtMidiPtr
+}
+
+type midiIn struct {
+	midi
+	in C.RtMidiInPtr
+	cb func(MIDIIn, []byte, float64)
+}
+
+type midiOut struct {
+	midi
+	out C.RtMidiOutPtr
+}
+
+// CompiledAPI determines the available compiled MIDI APIs.
+func CompiledAPI() (apis []API) {
+	n := C.rtmidi_get_compiled_api(nil, 0)
+	capis := make([]C.enum_RtMidiApi, n, n)
+	C.rtmidi_get_compiled_api(&capis[0], C.uint(n))
+	for _, capi := range capis {
+		apis = append(apis, API(capi))
+	}
+	return apis
+}
+
+// Format an API as a string
+func (api API) String() string {
+	switch api {
+	case APIUnspecified:
+		return "unspecified"
+	case APILinuxALSA:
+		return "alsa"
+	case APIUnixJack:
+		return "jack"
+	case APIMacOSXCore:
+		return "coreaudio"
+	case APIWindowsMM:
+		return "winmm"
+	case APIDummy:
+		return "dummy"
+	}
+	return "?"
 }
 
 // Open a MIDI input connection given by enumeration number.
@@ -175,17 +187,6 @@ func (m *midi) Close() error {
 	return nil
 }
 
-type midiIn struct {
-	midi
-	in C.RtMidiInPtr
-	cb func(MIDIIn, []byte, float64)
-}
-
-type midiOut struct {
-	midi
-	out C.RtMidiOutPtr
-}
-
 // Open a default MIDIIn port.
 func NewMIDIInDefault() (MIDIIn, error) {
 	in := C.rtmidi_in_create_default()
@@ -228,6 +229,10 @@ func (m *midiIn) Close() error {
 	return nil
 }
 
+func (m *midiIn) Destroy() {
+	C.rtmidi_in_free(m.in)
+}
+
 // Specify whether certain MIDI message types should be queued or ignored during input.
 //
 // By default, MIDI timing and active sensing messages are ignored
@@ -241,46 +246,6 @@ func (m *midiIn) IgnoreTypes(midiSysex bool, midiTime bool, midiSense bool) erro
 		return errors.New(C.GoString(m.in.msg))
 	}
 	return nil
-}
-
-var (
-	mu     sync.Mutex
-	inputs = map[int]*midiIn{}
-)
-
-func registerMIDIIn(m *midiIn) int {
-	mu.Lock()
-	defer mu.Unlock()
-	for i := 0; ; i++ {
-		if _, ok := inputs[i]; !ok {
-			inputs[i] = m
-			return i
-		}
-	}
-}
-
-func unregisterMIDIIn(m *midiIn) {
-	mu.Lock()
-	defer mu.Unlock()
-	for i := 0; i < len(inputs); i++ {
-		if inputs[i] == m {
-			delete(inputs, i)
-			return
-		}
-	}
-}
-
-func findMIDIIn(k int) *midiIn {
-	mu.Lock()
-	defer mu.Unlock()
-	return inputs[k]
-}
-
-//export goMIDIInCallback
-func goMIDIInCallback(ts C.double, msg *C.uchar, msgsz C.size_t, arg unsafe.Pointer) {
-	k := int(uintptr(arg))
-	m := findMIDIIn(k)
-	m.cb(m, C.GoBytes(unsafe.Pointer(msg), C.int(msgsz)), float64(ts))
 }
 
 // Set a callback function to be invoked for incoming MIDI messages.
@@ -320,10 +285,6 @@ func (m *midiIn) Message() ([]byte, float64, error) {
 		b[i] = byte(c)
 	}
 	return b, float64(r), nil
-}
-
-func (m *midiIn) Destroy() {
-	C.rtmidi_in_free(m.in)
 }
 
 // Open a default MIDIOut port.
@@ -366,6 +327,10 @@ func (m *midiOut) Close() error {
 	return nil
 }
 
+func (m *midiOut) Destroy() {
+	C.rtmidi_out_free(m.out)
+}
+
 // Immediately send a single message out an open MIDI output port.
 func (m *midiOut) SendMessage(b []byte) error {
 	p := C.CBytes(b)
@@ -377,8 +342,48 @@ func (m *midiOut) SendMessage(b []byte) error {
 	return nil
 }
 
-func (m *midiOut) Destroy() {
-	C.rtmidi_out_free(m.out)
+//
+//  Callback registry
+//
+
+var (
+	mu     sync.Mutex
+	inputs = map[int]*midiIn{}
+)
+
+func registerMIDIIn(m *midiIn) int {
+	mu.Lock()
+	defer mu.Unlock()
+	for i := 0; ; i++ {
+		if _, ok := inputs[i]; !ok {
+			inputs[i] = m
+			return i
+		}
+	}
+}
+
+func unregisterMIDIIn(m *midiIn) {
+	mu.Lock()
+	defer mu.Unlock()
+	for i := 0; i < len(inputs); i++ {
+		if inputs[i] == m {
+			delete(inputs, i)
+			return
+		}
+	}
+}
+
+func findMIDIIn(k int) *midiIn {
+	mu.Lock()
+	defer mu.Unlock()
+	return inputs[k]
+}
+
+//export goMIDIInCallback
+func goMIDIInCallback(ts C.double, msg *C.uchar, msgsz C.size_t, arg unsafe.Pointer) {
+	k := int(uintptr(arg))
+	m := findMIDIIn(k)
+	m.cb(m, C.GoBytes(unsafe.Pointer(msg), C.int(msgsz)), float64(ts))
 }
 
 func testCallback(idx int) {
