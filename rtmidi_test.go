@@ -127,11 +127,7 @@ func testInputPort(t *testing.T, m MIDIIn) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p := findMIDIIn(0)
-		if p == nil {
-			t.Errorf("No callback found in the registry")
-		}
-		testCallback(0)
+		m.(*midiIn).testCallback()
 		err = m.CancelCallback()
 		if err != nil {
 			t.Error(err)

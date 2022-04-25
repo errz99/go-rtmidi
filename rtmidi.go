@@ -84,7 +84,6 @@ type midi struct {
 type midiIn struct {
 	midi
 	in C.RtMidiInPtr
-	cb func(MIDIIn, []byte, float64)
 }
 
 type midiOut struct {
@@ -246,23 +245,12 @@ func (m *midiIn) IgnoreTypes(midiSysex bool, midiTime bool, midiSense bool) erro
 
 // Set a callback function to be invoked for incoming MIDI messages.
 func (m *midiIn) SetCallback(cb func(MIDIIn, []byte, float64)) error {
-	k := registerMIDIIn(m)
-	m.cb = cb
-	C.cgoSetCallback(m.in, C.int(k))
-	if !m.in.ok {
-		return errors.New(C.GoString(m.in.msg))
-	}
-	return nil
+	return registerMIDIIn(m, cb)
 }
 
 // Cancel use of the current callback function (if one exists).
 func (m *midiIn) CancelCallback() error {
-	unregisterMIDIIn(m)
-	C.rtmidi_in_cancel_callback(m.in)
-	if !m.in.ok {
-		return errors.New(C.GoString(m.in.msg))
-	}
-	return nil
+	return unregisterMIDIIn(m)
 }
 
 // Fill a byte buffer with the next available MIDI message in the input queue
@@ -343,45 +331,54 @@ func (m *midiOut) SendMessage(b []byte) error {
 //
 
 var (
-	mu     sync.Mutex
-	inputs = map[int]*midiIn{}
+	regmtx   = sync.RWMutex{}
+	registry = map[unsafe.Pointer]func([]byte, float64){}
 )
 
-func registerMIDIIn(m *midiIn) int {
-	mu.Lock()
-	defer mu.Unlock()
-	for i := 0; ; i++ {
-		if _, ok := inputs[i]; !ok {
-			inputs[i] = m
-			return i
+func registerMIDIIn(m *midiIn, cb func(MIDIIn, []byte, float64)) error {
+	regmtx.Lock()
+	defer regmtx.Unlock()
+
+	p := unsafe.Pointer(m.in)
+	if _, exists := registry[p]; exists {
+		C.rtmidi_in_cancel_callback(m.in)
+		if !m.in.ok {
+			return errors.New(C.GoString(m.in.msg))
+		}
+		delete(registry, p)
+	}
+
+	if cb != nil {
+		C.cgoSetCallback(m.in, p)
+		if !m.in.ok {
+			return errors.New(C.GoString(m.in.msg))
+		}
+		registry[p] = func(data []byte, ts float64) {
+			cb(m, data, ts)
 		}
 	}
+
+	return nil
 }
 
-func unregisterMIDIIn(m *midiIn) {
-	mu.Lock()
-	defer mu.Unlock()
-	for i := 0; i < len(inputs); i++ {
-		if inputs[i] == m {
-			delete(inputs, i)
-			return
-		}
+func unregisterMIDIIn(m *midiIn) error {
+	return registerMIDIIn(m, nil)
+}
+
+func dispatchCallback(p unsafe.Pointer, data []byte, ts float64) {
+	regmtx.RLock()
+	defer regmtx.RUnlock()
+
+	if cb, ok := registry[p]; ok {
+		cb(data, ts)
 	}
-}
-
-func findMIDIIn(k int) *midiIn {
-	mu.Lock()
-	defer mu.Unlock()
-	return inputs[k]
 }
 
 //export goMIDIInCallback
 func goMIDIInCallback(ts C.double, msg *C.uchar, msgsz C.size_t, arg unsafe.Pointer) {
-	k := int(uintptr(arg))
-	m := findMIDIIn(k)
-	m.cb(m, C.GoBytes(unsafe.Pointer(msg), C.int(msgsz)), float64(ts))
+	dispatchCallback(arg, C.GoBytes(unsafe.Pointer(msg), C.int(msgsz)), float64(ts))
 }
 
-func testCallback(idx int) {
-	C.testCallback(C.int(idx))
+func (m *midiIn) testCallback() {
+	C.testCallback(m.in)
 }
