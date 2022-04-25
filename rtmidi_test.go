@@ -66,12 +66,21 @@ func TestCompiledAPI(t *testing.T) {
 
 func TestAPIString(t *testing.T) {
 	for a := APIUnspecified; a <= APIDummy; a++ {
-		if a.String() == "?" {
+		if a.String() == "" {
 			t.Errorf("Missing string for API value %d", int(a))
 		}
+		if a == APIUnspecified {
+			continue
+		}
+		if a.DisplayName() == "" || a.DisplayName() == "Unknown" {
+			t.Errorf("Missing display name for API value %d", int(a))
+		}
 	}
-	if (APIDummy + API(1)).String() != "?" {
-		t.Errorf("More valid API strings than expected")
+	if (APIDummy + API(1)).String() != "" {
+		t.Error("More valid API strings than expected")
+	}
+	if (APIDummy + API(1)).DisplayName() != "Unknown" {
+		t.Error("More valid API display names than expected")
 	}
 }
 
@@ -274,7 +283,7 @@ func testErrs(m MIDI, err error) func(t *testing.T) {
 func TestAPIs(t *testing.T) {
 	for _, api := range CompiledAPI() {
 		name := api.String()
-		if name == "?" {
+		if name == "" {
 			name = fmt.Sprintf("RtMidiApi(%d)", int(api))
 			t.Errorf("API %s is unnamed", name)
 		}

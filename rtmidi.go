@@ -104,22 +104,18 @@ func CompiledAPI() (apis []API) {
 }
 
 // Format an API as a string
-func (api API) String() string {
-	switch api {
-	case APIUnspecified:
-		return "unspecified"
-	case APILinuxALSA:
-		return "alsa"
-	case APIUnixJack:
-		return "jack"
-	case APIMacOSXCore:
-		return "coreaudio"
-	case APIWindowsMM:
-		return "winmm"
-	case APIDummy:
-		return "dummy"
-	}
-	return "?"
+func (a API) String() string {
+	return a.Name()
+}
+
+// Lower case identifier for the API
+func (a API) Name() string {
+	return C.GoString(C.rtmidi_api_name(C.enum_RtMidiApi(a)))
+}
+
+// Display name for the API
+func (a API) DisplayName() string {
+	return C.GoString(C.rtmidi_api_display_name(C.enum_RtMidiApi(a)))
 }
 
 // Open a MIDI input connection given by enumeration number.
