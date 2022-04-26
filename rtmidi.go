@@ -91,6 +91,12 @@ type midiOut struct {
 	out C.RtMidiOutPtr
 }
 
+// Suppress printing error messages to cerr
+func quiet(ptr C.RtMidiPtr) midi {
+	C.rtmidi_set_error_quiet(ptr)
+	return midi{midi: ptr}
+}
+
 // CompiledAPI determines the available compiled MIDI APIs.
 func CompiledAPI() (apis []API) {
 	n := C.rtmidi_get_compiled_api(nil, 0)
@@ -189,7 +195,7 @@ func NewMIDIInDefault() (MIDIIn, error) {
 		defer C.rtmidi_in_free(in)
 		return nil, errors.New(C.GoString(in.msg))
 	}
-	return &midiIn{in: in, midi: midi{midi: C.RtMidiPtr(in)}}, nil
+	return &midiIn{in: in, midi: quiet(C.RtMidiPtr(in))}, nil
 }
 
 // Open a single MIDIIn port using the given API. One can provide a
@@ -202,7 +208,7 @@ func NewMIDIIn(api API, name string, queueSize int) (MIDIIn, error) {
 		defer C.rtmidi_in_free(in)
 		return nil, errors.New(C.GoString(in.msg))
 	}
-	return &midiIn{in: in, midi: midi{midi: C.RtMidiPtr(in)}}, nil
+	return &midiIn{in: in, midi: quiet(C.RtMidiPtr(in))}, nil
 }
 
 // Return the MIDI API specifier for the current instance of RtMidiIn.
@@ -278,7 +284,7 @@ func NewMIDIOutDefault() (MIDIOut, error) {
 		defer C.rtmidi_out_free(out)
 		return nil, errors.New(C.GoString(out.msg))
 	}
-	return &midiOut{out: out, midi: midi{midi: C.RtMidiPtr(out)}}, nil
+	return &midiOut{out: out, midi: quiet(C.RtMidiPtr(out))}, nil
 }
 
 // Open a single MIDIIn port using the given API with the given port name.
@@ -290,7 +296,7 @@ func NewMIDIOut(api API, name string) (MIDIOut, error) {
 		defer C.rtmidi_out_free(out)
 		return nil, errors.New(C.GoString(out.msg))
 	}
-	return &midiOut{out: out, midi: midi{midi: C.RtMidiPtr(out)}}, nil
+	return &midiOut{out: out, midi: quiet(C.RtMidiPtr(out))}, nil
 }
 
 // Return the MIDI API specifier for the current instance of RtMidiOut.

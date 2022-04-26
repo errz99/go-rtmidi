@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include "rtmidi/rtmidi_c.h"
 
+
+void rtmidi_set_error_quiet (RtMidiPtr device);
+
 extern void goMIDIInCallback(double ts, unsigned char *msg, size_t msgsz, void *arg);
 
 static inline void midiInCallback(double ts, const unsigned char *msg, size_t msgsz, void *arg) {

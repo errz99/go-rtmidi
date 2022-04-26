@@ -12,3 +12,20 @@
 #define RTMIDI_SOURCE_INCLUDED
 #include "rtmidi/RtMidi.cpp"
 #include "rtmidi/rtmidi_c.cpp"
+
+
+static void quietErr(RtMidiError::Type type, const std::string &errorText, void *userData) {
+    if ( type != RtMidiError::WARNING && type != RtMidiError::DEBUG_WARNING ) {
+        throw RtMidiError( errorText, type );
+    }
+}
+
+extern "C" void rtmidi_set_error_quiet (RtMidiPtr device) {
+    try {
+        ((RtMidiIn*) device->ptr)->setErrorCallback (quietErr, nil);
+    } catch (const RtMidiError & err) {
+        device->ok  = false;
+        device->msg = err.what ();
+    }
+}
+
