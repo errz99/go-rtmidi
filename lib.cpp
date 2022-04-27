@@ -22,7 +22,7 @@ static void quietErr(RtMidiError::Type type, const std::string &errorText, void 
 
 extern "C" void rtmidi_set_error_quiet (RtMidiPtr device) {
     try {
-        ((RtMidiIn*) device->ptr)->setErrorCallback (quietErr, nil);
+        ((RtMidiIn*) device->ptr)->setErrorCallback (quietErr, NULL);
     } catch (const RtMidiError & err) {
         device->ok  = false;
         device->msg = err.what ();
