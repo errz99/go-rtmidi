@@ -330,3 +330,92 @@ func TestMain(m *testing.M) {
 	}
 	os.Exit(m.Run())
 }
+
+//
+// Benchmarks
+//
+func benchmarkSend(b *testing.B, msg []byte) {
+	b.SetBytes(int64(len(msg)))
+
+	out, err := NewMIDIOutDefault()
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer out.Close()
+
+	err = out.OpenVirtualPort("RtMidiVirtual")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err = out.SendMessage(msg)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func benchmarkSysEx(b *testing.B, size int) {
+	msg := make([]byte, size)
+	msg[0] = 0xf0
+	msg[len(msg)-1] = 0xf7
+	benchmarkSend(b, msg)
+}
+
+func benchmarkNotes(b *testing.B, size int) {
+	msg := make([]byte, 0, 6*size)
+	for i := 0; i < size; i++ {
+		msg = append(msg, []byte{0x90, 0x32, 0x90, 0x80, 0x32, 0x00}...)
+	}
+	benchmarkSend(b, msg)
+}
+
+func BenchmarkNoteOn(b *testing.B) {
+	benchmarkSend(b, []byte{0x90, 0x32, 0x90})
+}
+
+func BenchmarkNotes24(b *testing.B) {
+	benchmarkNotes(b, 24)
+}
+
+func BenchmarkNotes96(b *testing.B) {
+	benchmarkNotes(b, 96)
+}
+
+func BenchmarkNotes256(b *testing.B) {
+	benchmarkNotes(b, 256)
+}
+
+func BenchmarkNotes1024(b *testing.B) {
+	benchmarkNotes(b, 1024)
+}
+
+func BenchmarkSysEx7(b *testing.B) {
+	benchmarkSysEx(b, 7)
+}
+
+func BenchmarkSysEx60(b *testing.B) {
+	benchmarkSysEx(b, 60)
+}
+
+func BenchmarkSysEx512(b *testing.B) {
+	benchmarkSysEx(b, 512)
+}
+
+func BenchmarkSysEx1024(b *testing.B) {
+	benchmarkSysEx(b, 1024)
+}
+
+func BenchmarkSysEx2048(b *testing.B) {
+	benchmarkSysEx(b, 2048)
+}
+
+func BenchmarkSysEx4096(b *testing.B) {
+	benchmarkSysEx(b, 4096)
+}
+
+func BenchmarkSysEx65535(b *testing.B) {
+	benchmarkSysEx(b, 65535)
+}
