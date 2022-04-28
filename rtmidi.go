@@ -342,6 +342,15 @@ func (m *midiOut) Destroy() {
 
 // Immediately send a single message out an open MIDI output port.
 func (m *midiOut) SendMessage(b []byte) error {
+	m.midi.Lock()
+	defer m.midi.Unlock()
+
+	select {
+	case <-m.done:
+		return ErrClosed
+	default:
+	}
+
 	p := C.CBytes(b)
 	defer C.free(unsafe.Pointer(p))
 	C.rtmidi_out_send_message(m.out, (*C.uchar)(p), C.int(len(b)))
