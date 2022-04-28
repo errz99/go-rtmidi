@@ -79,10 +79,6 @@ type MIDIOut interface {
 // Private types
 type midi struct {
 	midi C.RtMidiPtr
-
-	mu       sync.Mutex
-	done     chan struct{}
-	closeErr error
 }
 
 type midiIn struct {
@@ -98,7 +94,7 @@ type midiOut struct {
 // Suppress printing error messages to cerr
 func quiet(ptr C.RtMidiPtr) midi {
 	C.rtmidi_set_error_quiet(ptr)
-	return midi{midi: ptr, done: make(chan struct{})}
+	return midi{midi: ptr}
 }
 
 // CompiledAPI determines the available compiled MIDI APIs.
@@ -185,19 +181,11 @@ func (m *midi) PortCount() (int, error) {
 
 // Close an open MIDI connection.
 func (m *midi) Close() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	select {
-	case <-m.done:
-	default:
-		C.rtmidi_close_port(C.RtMidiPtr(m.midi))
-		if !m.midi.ok {
-			m.closeErr = errors.New(C.GoString(m.midi.msg))
-		}
-		close(m.done)
+	C.rtmidi_close_port(C.RtMidiPtr(m.midi))
+	if !m.midi.ok {
+		return errors.New(C.GoString(m.midi.msg))
 	}
-	return m.closeErr
+	return nil
 }
 
 // Open a default MIDIIn port.
