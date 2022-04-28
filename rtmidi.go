@@ -35,6 +35,10 @@ const (
 	APIDummy API = C.RTMIDI_API_RTMIDI_DUMMY
 )
 
+var (
+	ErrClosed = errors.New("MIDI port is closed")
+)
+
 // API is an enumeration of possible MIDI API specifiers.
 type API C.enum_RtMidiApi
 
@@ -79,6 +83,10 @@ type MIDIOut interface {
 // Private types
 type midi struct {
 	midi C.RtMidiPtr
+
+	sync.Mutex
+	done     chan struct{}
+	closeErr error
 }
 
 type midiIn struct {
@@ -94,7 +102,7 @@ type midiOut struct {
 // Suppress printing error messages to cerr
 func quiet(ptr C.RtMidiPtr) midi {
 	C.rtmidi_set_error_quiet(ptr)
-	return midi{midi: ptr}
+	return midi{midi: ptr, done: make(chan struct{})}
 }
 
 // CompiledAPI determines the available compiled MIDI APIs.
@@ -121,6 +129,29 @@ func (a API) Name() string {
 // Display name for the API
 func (a API) DisplayName() string {
 	return C.GoString(C.rtmidi_api_display_name(C.enum_RtMidiApi(a)))
+}
+
+// Only close once
+func (m *midi) close(in C.RtMidiInPtr, out C.RtMidiOutPtr) error {
+	m.Lock()
+	defer m.Unlock()
+
+	select {
+	case <-m.done:
+	default:
+		C.rtmidi_close_port(C.RtMidiPtr(m.midi))
+		if !m.midi.ok {
+			m.closeErr = errors.New(C.GoString(m.midi.msg))
+		}
+		if in != nil {
+			C.rtmidi_in_free(in)
+		}
+		if out != nil {
+			C.rtmidi_out_free(out)
+		}
+		close(m.done)
+	}
+	return m.closeErr
 }
 
 // Open a MIDI input connection given by enumeration number.
@@ -181,11 +212,7 @@ func (m *midi) PortCount() (int, error) {
 
 // Close an open MIDI connection.
 func (m *midi) Close() error {
-	C.rtmidi_close_port(C.RtMidiPtr(m.midi))
-	if !m.midi.ok {
-		return errors.New(C.GoString(m.midi.msg))
-	}
-	return nil
+	return m.close(nil, nil)
 }
 
 // Open a default MIDIIn port.
@@ -223,15 +250,11 @@ func (m *midiIn) API() (API, error) {
 // Close an open MIDI connection (if one exists).
 func (m *midiIn) Close() error {
 	unregisterMIDIIn(m)
-	if err := m.midi.Close(); err != nil {
-		return err
-	}
-	C.rtmidi_in_free(m.in)
-	return nil
+	return m.midi.close(m.in, nil)
 }
 
 func (m *midiIn) Destroy() {
-	C.rtmidi_in_free(m.in)
+	m.Close()
 }
 
 // Specify whether certain MIDI message types should be queued or ignored during input.
@@ -310,15 +333,11 @@ func (m *midiOut) API() (API, error) {
 
 // Close an open MIDI connection.
 func (m *midiOut) Close() error {
-	if err := m.midi.Close(); err != nil {
-		return err
-	}
-	C.rtmidi_out_free(m.out)
-	return nil
+	return m.midi.close(nil, m.out)
 }
 
 func (m *midiOut) Destroy() {
-	C.rtmidi_out_free(m.out)
+	m.Close()
 }
 
 // Immediately send a single message out an open MIDI output port.
@@ -335,7 +354,6 @@ func (m *midiOut) SendMessage(b []byte) error {
 //
 //  Callback registry
 //
-
 var (
 	regmtx   = sync.RWMutex{}
 	registry = map[unsafe.Pointer]func([]byte, float64){}
