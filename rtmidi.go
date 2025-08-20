@@ -4,6 +4,8 @@ package rtmidi
 #cgo CXXFLAGS: -g -std=c++11
 #cgo LDFLAGS: -g
 
+#cgo freebsd CXXFLAGS: -D__UNIX_JACK__
+#cgo freebsd LDFLAGS: -pthread
 #cgo linux CXXFLAGS: -D__LINUX_ALSA__
 #cgo linux LDFLAGS: -lasound -pthread
 #cgo windows CXXFLAGS: -D__WINDOWS_MM__
@@ -360,9 +362,7 @@ func (m *midiOut) SendMessage(b []byte) error {
 	return nil
 }
 
-//
-//  Callback registry
-//
+// Callback registry
 var (
 	regmtx   = sync.RWMutex{}
 	registry = map[unsafe.Pointer]func([]byte, float64){}
